@@ -3,48 +3,40 @@ package main
 import (
 	"fmt"
 	"time"
-	
-	"github.com/dhague/aeropi/adafruit/bme280"
-	"github.com/dhague/aeropi/adafruit/lcd16x2keypad"
-	"github.com/dhague/aeropi/i2c"
 
-	"github.com/hybridgroup/gobot"
-	"github.com/hybridgroup/gobot/platforms/gpio"
-//	"github.com/hybridgroup/gobot/platforms/i2c"
-	"github.com/hybridgroup/gobot/platforms/raspi"
+	log "gopkg.in/inconshreveable/log15.v2"
+
+	"github.com/davecheney/i2c"
+	"github.com/dhague/atmosphere"
+	"github.com/quinte17/bme280"
 )
 
 func main() {
-	temp, pressure, humidity := bme280.Read()
 
-	lcdContent := lcd16x2keypad.LcdArray{}
-	lcdContent.SetLine(0, fmt.Sprintf("%v\xb0C %v hPa", temp, pressure))
-	lcdContent.SetLine(1, fmt.Sprintf("%v%% humidity", humidity))
+	log.Debug("Starting up...")
 
-	lcd16x2keypad.Show(lcdContent)
-
-	gbot := gobot.NewGobot()
-
-	r := raspi.NewRaspiAdaptor("raspi")
-	led := gpio.NewLedDriver(r, "led", "7")
-	
-	//TODO - use these values - not compiling otherwise :-)
-	sensor := i2c.NewBME280Driver(r, "sensor")
-	display := i2c.NewAdafruit2x16LcdDriver(r, "display")
-
-	work := func() {
-		gobot.Every(1*time.Second, func() {
-			led.Toggle()
-		})
+	dev, err := i2c.New(0x77, 1)
+	if err != nil {
+		log.Error("Error: %v", err)
+	}
+	bme, err := bme280.NewI2CDriver(dev)
+	if err != nil {
+		log.Error("Error: %v", err)
 	}
 
-	robot := gobot.NewRobot("blinkBot",
-		[]gobot.Connection{r},
-		[]gobot.Device{led},
-		work,
-	)
+	for {
+		weather, err := bme.Readenv()
 
-	gbot.AddRobot(robot)
+		density := atmosphere.AirDensity(atmosphere.TemperatureC(weather.Temp),
+			atmosphere.Pressure(weather.Press*100),
+			atmosphere.RelativeHumidity(weather.Hum))
+		if err != nil {
+			log.Error("Error: %v", err)
+		} else {
+			log.Debug(fmt.Sprintf("Temperature (degC) %2.2f, pressure (mbar) %4.2f, humidity %2.2f, Density %2.3f kg/m3, CorrFact %1.4f",
+				weather.Temp, weather.Press, weather.Hum, float64(density), float64(density*0.8)))
+		}
 
-	gbot.Start()
+		<-time.After(5 * time.Second)
+	}
 }
